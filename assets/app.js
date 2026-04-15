@@ -200,6 +200,18 @@ function playFeed(cam, feed, index) {
     b.classList.toggle('active', i === index);
   });
   els.viewerPlayer.innerHTML = '';
+
+  // Mixed-content pre-flight: if we're on HTTPS and the feed is HTTP, the
+  // browser will silently block the request. Show an explicit warning so the
+  // user understands what's happening.
+  if (location.protocol === 'https:' && /^http:\/\//i.test(feed.url)) {
+    renderError(
+      'this feed is served over HTTP; your browser blocks insecure requests on HTTPS pages. open it in a new tab:'
+    );
+    addLink('open feed (HTTP)', feed.url);
+    return;
+  }
+
   switch (feed.type) {
     case 'jpeg': return renderJpeg(cam, feed);
     case 'mjpeg': return renderMjpeg(cam, feed);
@@ -213,7 +225,6 @@ function playFeed(cam, feed, index) {
 function renderJpeg(cam, feed) {
   const img = document.createElement('img');
   img.alt = cam.name || 'camera image';
-  img.referrerPolicy = 'no-referrer';
   els.viewerPlayer.appendChild(img);
   const base = feed.url;
   const refreshSec = Math.max(1, Number(feed.refreshSec) || 10);
@@ -229,7 +240,6 @@ function renderJpeg(cam, feed) {
 function renderMjpeg(cam, feed) {
   const img = document.createElement('img');
   img.alt = cam.name || 'camera stream';
-  img.referrerPolicy = 'no-referrer';
   img.src = feed.url;
   img.addEventListener('error', () => tryFallback(cam, feed, 'stream error'));
   els.viewerPlayer.appendChild(img);

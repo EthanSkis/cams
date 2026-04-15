@@ -32,32 +32,24 @@ const STATES = [
   // (that lives behind its.txdot.gov via a redirect service that 404s on the
   // public internet). Until we find a stable image pattern, the ~2,800 Texas
   // cameras come in via the 511tx IBI source (KEY_511TX env var).
-  {
-    slug: 'cdot',
-    region: 'CO',
-    tags: ['traffic', 'highway'],
-    layerUrl: 'https://services.arcgis.com/DO4gTjwJVIJ7O9Ca/arcgis/rest/services/CDOT_Traffic_Cameras_V2/FeatureServer/0',
-    mapFeature({ props, lat, lon }) {
-      let img = props.URL_Cam || guessImageUrl(props);
-      if (typeof img !== 'string' || !img) return null;
-      // Some CDOT rows double-prefix: "http://www.cotrip.org/http://host/…".
-      // Strip the spurious prefix when another protocol follows.
-      img = img.replace(/^https?:\/\/[^/]+\/(?=https?:\/\/)/i, '');
-      return {
-        id: `cdot:${props.CameraViewId ?? props.OBJECTID}`,
-        name: props.CameraName || guessName(props) || `CDOT Camera ${props.CameraId ?? ''}`,
-        roadway: props.RoadName || guessRoadway(props),
-        direction: props.Direction || guessDirection(props),
-        lat, lon,
-        feeds: [{ type: 'jpeg', url: img, refreshSec: 10 }]
-      };
-    }
-  },
+  // CDOT's ArcGIS layer exposes camera positions and *links* to cotrip.org,
+  // but cotrip.org is an SPA — every URL returns the same HTML page, so the
+  // "image" URLs in URL_Cam don't actually resolve to JPEGs. Until we find a
+  // stable image endpoint, we exclude Colorado rather than ship 900 broken
+  // entries.
+  // {
+  //   slug: 'cdot', region: 'CO', ...
+  // },
   {
     slug: 'ncdot',
     region: 'NC',
     tags: ['traffic', 'highway'],
     layerUrl: 'https://services.arcgis.com/NuWFvHYDMVmmxMeM/arcgis/rest/services/NCDOT_TIMSCameras/FeatureServer/0',
+    // The NCDOT service contains ~200k rows with massive duplication per
+    // CameraID. The stale-scan cap stops us after a contiguous block of
+    // duplicates; in practice we capture ~300 cameras, which is a fraction
+    // of the ~1800 that exist. Expanding coverage requires a NCDOT-specific
+    // adapter that pages through distinct IDs via groupByFieldsForStatistics.
     // NCDOT serves snapshots via their cameras/images endpoint; the Link field
     // already contains the usable URL.
     mapFeature({ props, lat, lon }) {
@@ -100,6 +92,7 @@ export async function run() {
         layerUrl: s.layerUrl,
         source: s.slug,
         region: s.region,
+        orderBy: s.orderBy,
         mapFeature: s.mapFeature
       });
       for (const r of rows) r.tags = r.tags || s.tags;

@@ -14,19 +14,19 @@ const REQUEST_SIZE = 2000; // ask for this many; server may return fewer
  * asked for vs. received.
  * @param {string} layerUrl - e.g. https://.../FeatureServer/0
  */
-export async function* queryFeatures(layerUrl, { where = '1=1', outFields = '*' } = {}) {
+export async function* queryFeatures(layerUrl, { where = '1=1', outFields = '*', orderBy } = {}) {
   let offset = 0;
   for (;;) {
-    const url =
-      `${layerUrl}/query?` +
-      new URLSearchParams({
-        where,
-        outFields,
-        outSR: '4326',
-        f: 'geojson',
-        resultOffset: String(offset),
-        resultRecordCount: String(REQUEST_SIZE)
-      }).toString();
+    const params = new URLSearchParams({
+      where,
+      outFields,
+      outSR: '4326',
+      f: 'geojson',
+      resultOffset: String(offset),
+      resultRecordCount: String(REQUEST_SIZE)
+    });
+    if (orderBy) params.set('orderByFields', orderBy);
+    const url = `${layerUrl}/query?` + params.toString();
     const j = await fetchJson(url, { cacheMs: 5 * 60 * 1000 });
     const feats = j.features || [];
     for (const f of feats) yield f;
@@ -47,13 +47,13 @@ export async function* queryFeatures(layerUrl, { where = '1=1', outFields = '*' 
  * millions of duplicate rows per camera).
  */
 export async function scrapeArcgis({
-  layerUrl, source, region, where = '1=1', mapFeature,
-  maxFeatures = 50_000, staleScanLimit = 20_000
+  layerUrl, source, region, where = '1=1', orderBy, mapFeature,
+  maxFeatures = 200_000, staleScanLimit = 50_000
 }) {
   const byId = new Map();
   let scanned = 0;
   let staleSince = 0;
-  for await (const feat of queryFeatures(layerUrl, { where })) {
+  for await (const feat of queryFeatures(layerUrl, { where, orderBy })) {
     scanned++;
     if (scanned > maxFeatures) break;
     const props = feat.properties || {};
