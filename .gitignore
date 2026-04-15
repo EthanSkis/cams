@@ -1,0 +1,4 @@
+node_modules/
+scraper/.cache/
+*.log
+.DS_Store

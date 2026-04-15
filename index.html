@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>US Public Cameras — Live Map</title>
+  <meta name="description" content="Every publicly available live camera in the United States, on one map. Fully static — no backend." />
+  <meta name="color-scheme" content="dark light" />
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="assets/app.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="title">
+      <h1>US Public Cameras</h1>
+      <span id="stats" class="stats">loading…</span>
+    </div>
+    <div class="controls">
+      <input id="search" type="search" placeholder="search name, road, city…" autocomplete="off" />
+      <select id="filter-source" aria-label="Filter by source">
+        <option value="">all sources</option>
+      </select>
+      <select id="filter-region" aria-label="Filter by state">
+        <option value="">all states</option>
+      </select>
+      <select id="filter-tag" aria-label="Filter by category">
+        <option value="">all categories</option>
+      </select>
+      <button id="reset" type="button">reset</button>
+    </div>
+  </header>
+
+  <div id="map" role="application" aria-label="Camera map"></div>
+
+  <aside id="viewer" hidden aria-hidden="true">
+    <button id="viewer-close" type="button" aria-label="Close">×</button>
+    <h2 id="viewer-title">Camera</h2>
+    <div class="viewer-meta" id="viewer-meta"></div>
+    <div class="viewer-tabs" id="viewer-tabs"></div>
+    <div id="viewer-player" class="viewer-player"></div>
+    <div class="viewer-links" id="viewer-links"></div>
+  </aside>
+
+  <footer id="footer">
+    <span>Data refreshed <span id="gen-at">—</span>.</span>
+    <span>Camera data © respective DOTs and agencies. Map © OpenStreetMap contributors.</span>
+    <a href="https://github.com/EthanSkis/cams" target="_blank" rel="noreferrer noopener">source</a>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.11/dist/hls.min.js" crossorigin="anonymous"></script>
+  <script src="assets/app.js" defer></script>
+</body>
+</html>
