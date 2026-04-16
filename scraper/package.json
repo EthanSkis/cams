@@ -1,0 +1,14 @@
+{
+  "name": "us-cams-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scrapes public US camera feeds and emits a unified cameras.json",
+  "scripts": {
+    "start": "node src/index.js",
+    "build": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

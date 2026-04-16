@@ -1,0 +1,246 @@
+:root {
+  --bg: #0f1115;
+  --fg: #e7ecf3;
+  --muted: #8b95a7;
+  --accent: #4f8cff;
+  --accent-2: #6ad1ff;
+  --danger: #ff6b6b;
+  --panel: #171a21;
+  --panel-border: #252a34;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f6fb;
+    --fg: #1a1f2b;
+    --muted: #5b6474;
+    --accent: #2457d6;
+    --accent-2: #1aa0c4;
+    --panel: #ffffff;
+    --panel-border: #dfe4ee;
+    --shadow: 0 8px 24px rgba(20, 30, 60, 0.15);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.topbar {
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
+  z-index: 500;
+}
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.topbar h1 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: 0.02em;
+}
+.topbar h1::before { content: "📷 "; }
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.controls input,
+.controls select {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  outline: none;
+}
+.controls input:focus,
+.controls select:focus {
+  border-color: var(--accent);
+}
+.controls input {
+  min-width: 220px;
+}
+.count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  padding: 0 6px;
+}
+
+main#map {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
+
+.credits {
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel);
+  border-top: 1px solid var(--panel-border);
+  padding: 6px 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.credits a {
+  color: var(--accent-2);
+  text-decoration: none;
+}
+.credits a:hover { text-decoration: underline; }
+
+.viewer {
+  position: fixed;
+  right: 16px;
+  bottom: 44px;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(80vh, 720px);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+.viewer[hidden] { display: none; }
+
+.viewer-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 22px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.viewer-close:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--fg);
+}
+.viewer-head {
+  padding: 10px 40px 6px 14px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.viewer-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.viewer-head p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.viewer-body {
+  padding: 10px 14px 12px;
+  overflow: auto;
+}
+.viewer-media {
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9aa3b4;
+}
+.viewer-media img,
+.viewer-media video,
+.viewer-media iframe {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border: 0;
+  display: block;
+}
+.viewer-media .error {
+  padding: 16px;
+  text-align: center;
+  color: var(--danger);
+  font-size: 13px;
+}
+.viewer-media .loading {
+  color: var(--muted);
+  font-size: 12px;
+}
+.viewer-meta {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.viewer-meta a {
+  color: var(--accent-2);
+  text-decoration: none;
+}
+.viewer-meta a:hover { text-decoration: underline; }
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(79, 140, 255, 0.15);
+  color: var(--accent);
+  font-size: 11px;
+  margin-right: 6px;
+}
+
+/* Marker cluster colors per zoom */
+.marker-cluster-small  { background-color: rgba(79, 140, 255, 0.5); }
+.marker-cluster-small div { background-color: rgba(79, 140, 255, 0.8); color: white; }
+.marker-cluster-medium { background-color: rgba(106, 209, 255, 0.5); }
+.marker-cluster-medium div { background-color: rgba(36, 87, 214, 0.8); color: white; }
+.marker-cluster-large  { background-color: rgba(255, 153, 51, 0.5); }
+.marker-cluster-large div { background-color: rgba(230, 100, 30, 0.85); color: white; }
+
+/* Leaflet: let the map work on dark themes */
+.leaflet-container {
+  background: var(--bg);
+}
+
+/* Small screens: viewer takes the bottom half */
+@media (max-width: 640px) {
+  .viewer {
+    right: 0;
+    left: 0;
+    bottom: 28px;
+    width: 100%;
+    max-height: 60vh;
+    border-radius: 14px 14px 0 0;
+  }
+  .controls input {
+    min-width: 0;
+    flex: 1;
+  }
+}
