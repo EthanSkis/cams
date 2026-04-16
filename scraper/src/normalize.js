@@ -1,124 +1,100 @@
-// Canonical Camera schema + validator.
+// Normalizes camera records from many sources into a single schema.
 //
-// Every source adapter returns an array of objects shaped like `CameraInput`.
-// `normalize()` fills defaults, validates, de-dupes, drops junk, and returns a
-// sorted array of `Camera` records ready to be written to cameras.json.
+// Output record shape:
+// {
+//   id: string,            // stable id ("source:original_id")
+//   name: string,
+//   description?: string,
+//   lat: number,
+//   lon: number,
+//   state: string | null,  // 2-letter USPS code
+//   region?: string,       // county / city / route
+//   route?: string,        // road name if applicable
+//   // ---- view ----
+//   view: "image" | "hls" | "mjpeg" | "youtube" | "iframe" | "page",
+//   url: string,           // image/video/iframe/page url
+//   refresh?: number,      // suggested refresh interval in seconds (for images)
+//   // ---- meta ----
+//   source: string,        // short source key
+//   sourceName: string,    // human source name
+//   sourceUrl?: string,    // link back to source
+//   category: "traffic" | "weather" | "park" | "beach" | "ski" | "airport" | "city" | "other",
+//   tags?: string[],
+// }
 
-const FEED_TYPES = new Set(['jpeg', 'mjpeg', 'hls', 'iframe', 'youtube']);
+import { inUsBbox, safeNumber, slug, uniqueBy } from "./utils.js";
 
-function looksLikeUrl(u) {
-  return typeof u === 'string' && /^https?:\/\//i.test(u) && u.length < 2000;
-}
+const VALID_VIEWS = new Set([
+  "image",
+  "hls",
+  "mjpeg",
+  "youtube",
+  "iframe",
+  "page",
+]);
 
-function coerceFeeds(feeds) {
-  if (!Array.isArray(feeds)) return [];
-  const out = [];
-  const seen = new Set();
-  for (const f of feeds) {
-    if (!f || !looksLikeUrl(f.url)) continue;
-    const type = FEED_TYPES.has(f.type) ? f.type : guessType(f.url);
-    if (!type) continue;
-    const key = `${type}|${f.url}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const entry = { type, url: f.url };
-    if (type === 'jpeg' && Number.isFinite(f.refreshSec)) {
-      entry.refreshSec = Math.max(1, Math.min(600, Math.round(f.refreshSec)));
-    }
-    if (type === 'jpeg' && entry.refreshSec === undefined) entry.refreshSec = 10;
-    out.push(entry);
-  }
-  return out;
-}
+const VALID_CATEGORIES = new Set([
+  "traffic",
+  "weather",
+  "park",
+  "beach",
+  "ski",
+  "airport",
+  "city",
+  "other",
+]);
 
-function guessType(url) {
-  const u = url.toLowerCase();
-  if (u.includes('.m3u8')) return 'hls';
-  if (u.includes('.mjpg') || u.includes('mjpeg')) return 'mjpeg';
-  if (u.includes('youtube.com') || u.includes('youtu.be')) return 'youtube';
-  if (/\.(jpg|jpeg|png|webp)(\?|$)/.test(u)) return 'jpeg';
-  if (u.includes('/image') || u.includes('snapshot')) return 'jpeg';
-  return 'iframe';
-}
+export function normalizeRecord(raw) {
+  const lat = safeNumber(raw.lat);
+  const lon = safeNumber(raw.lon);
+  if (lat === null || lon === null) return null;
+  if (!inUsBbox(lat, lon)) return null;
 
-function inUSBounds(lat, lon) {
-  // Loose bounding box covering CONUS, AK, HI, PR — just to catch garbage.
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
-  if (lat < 17 || lat > 72) return false;
-  if (lon < -180 || lon > -65) return false;
-  return true;
-}
+  const view = VALID_VIEWS.has(raw.view) ? raw.view : "page";
+  const url = String(raw.url || "").trim();
+  if (!url) return null;
+  if (!/^https?:\/\//i.test(url) && view !== "iframe") return null;
 
-function cleanString(s, max = 200) {
-  if (typeof s !== 'string') return undefined;
-  const t = s.replace(/\s+/g, ' ').trim();
-  if (!t) return undefined;
-  return t.length > max ? t.slice(0, max - 1) + '…' : t;
-}
+  const category = VALID_CATEGORIES.has(raw.category) ? raw.category : "other";
+  const source = slug(raw.source || "unknown");
+  const idRaw = raw.id ?? `${lat.toFixed(5)},${lon.toFixed(5)}:${url}`;
+  const id = `${source}:${slug(String(idRaw))}`.slice(0, 160);
 
-function slug(s) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
-}
-
-/**
- * Normalize one raw camera record.
- * Returns a Camera or null (if invalid / should be dropped).
- */
-export function normalizeOne(raw, { source } = {}) {
-  if (!raw) return null;
-  const src = cleanString(raw.source || source) || 'unknown';
-  const lat = Number(raw.lat);
-  const lon = Number(raw.lon);
-  if (!inUSBounds(lat, lon)) return null;
-
-  const feeds = coerceFeeds(raw.feeds);
-  if (!feeds.length) return null;
-
-  const name = cleanString(raw.name) || cleanString(raw.roadway) || 'Unnamed camera';
-  const id =
-    cleanString(raw.id) ||
-    `${src}:${slug(name)}-${lat.toFixed(4)}-${lon.toFixed(4)}`;
-
-  const tags = Array.isArray(raw.tags)
-    ? Array.from(new Set(raw.tags.map((t) => cleanString(t)).filter(Boolean)))
-    : [];
-
-  const rec = {
+  return {
     id,
-    source: src,
-    name,
-    lat: Number(lat.toFixed(6)),
-    lon: Number(lon.toFixed(6)),
-    feeds,
-    tags
+    name: String(raw.name || "Camera").trim().slice(0, 160),
+    description: raw.description ? String(raw.description).slice(0, 400) : undefined,
+    lat: round(lat, 6),
+    lon: round(lon, 6),
+    state: raw.state ? String(raw.state).toUpperCase().slice(0, 2) : null,
+    region: raw.region ? String(raw.region).slice(0, 80) : undefined,
+    route: raw.route ? String(raw.route).slice(0, 80) : undefined,
+    view,
+    url,
+    refresh: raw.refresh ? Math.max(2, Math.min(600, Number(raw.refresh))) : undefined,
+    source,
+    sourceName: raw.sourceName || raw.source || "Unknown",
+    sourceUrl: raw.sourceUrl || undefined,
+    category,
+    tags: Array.isArray(raw.tags) ? raw.tags.slice(0, 10) : undefined,
   };
-  const region = cleanString(raw.region);
-  if (region) rec.region = region.toUpperCase().slice(0, 2);
-  const locality = cleanString(raw.locality);
-  if (locality) rec.locality = locality;
-  const roadway = cleanString(raw.roadway);
-  if (roadway) rec.roadway = roadway;
-  const direction = cleanString(raw.direction);
-  if (direction) rec.direction = direction;
-  return rec;
 }
 
-/**
- * Normalize an array of raw records. Drops invalid, de-dupes by id.
- */
-export function normalize(records, opts = {}) {
-  const seen = new Map();
-  let dropped = 0;
-  for (const raw of records || []) {
-    const n = normalizeOne(raw, opts);
-    if (!n) { dropped++; continue; }
-    // Prefer record with more feeds on dup.
-    const existing = seen.get(n.id);
-    if (!existing || n.feeds.length > existing.feeds.length) seen.set(n.id, n);
+export function normalizeAll(records) {
+  const normalized = [];
+  for (const r of records) {
+    const n = normalizeRecord(r);
+    if (n) normalized.push(n);
   }
-  return { records: Array.from(seen.values()), dropped };
+  // Deduplicate by id, then by (rounded lat/lon + view + url).
+  const byId = uniqueBy(normalized, (r) => r.id);
+  return uniqueBy(
+    byId,
+    (r) => `${r.lat.toFixed(4)},${r.lon.toFixed(4)}:${r.view}:${r.url}`,
+  );
+}
+
+function round(n, p) {
+  const f = Math.pow(10, p);
+  return Math.round(n * f) / f;
 }

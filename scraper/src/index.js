@@ -1,114 +1,74 @@
-// Build entry: runs every source module under ./sources, normalizes the union,
-// and writes ../../assets/cameras.json.
-//
-// Run with `npm run scrape` (or `node src/index.js`). Optional flag:
-//   --only=nyctmc,arcgis-states       only run these source module names
-//   --dry                              don't write the output file
+// Main scraper entry point. Runs every source, normalizes and deduplicates
+// the results, and writes the combined list to ../assets/cameras.json.
 
-import { readdir } from 'node:fs/promises';
-import { writeFileSync, mkdirSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { normalize } from './normalize.js';
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { normalizeAll } from "./normalize.js";
+import { logSource } from "./utils.js";
+
+import { scrapeCaltrans } from "./sources/state/caltrans.js";
+import { scrapeWsdot } from "./sources/state/wsdot.js";
+import { scrapeAllIbi511 } from "./sources/state/ibi511.js";
+import { scrapeOhgo } from "./sources/state/ohgo.js";
+import { scrapeNcdot } from "./sources/state/ncdot.js";
+import { scrapeNycTmc } from "./sources/city/nyc-tmc.js";
+import { scrapeNps } from "./sources/federal/nps.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const OUT_PATH = resolve(__dirname, "..", "..", "assets", "cameras.json");
 
-const args = new Map();
-for (const a of process.argv.slice(2)) {
-  const m = /^--([^=]+)(?:=(.*))?$/.exec(a);
-  if (m) args.set(m[1], m[2] ?? true);
-}
-
-const onlyList = typeof args.get('only') === 'string'
-  ? args.get('only').split(',').map((s) => s.trim()).filter(Boolean)
-  : null;
-
-async function discoverSources() {
-  const root = join(__dirname, 'sources');
-  const found = [];
-  for (const group of await readdir(root)) {
-    const groupDir = join(root, group);
-    let entries;
-    try { entries = await readdir(groupDir); } catch { continue; }
-    for (const f of entries) {
-      if (!f.endsWith('.js')) continue;
-      const full = join(groupDir, f);
-      const name = f.replace(/\.js$/, '');
-      found.push({ group, name, path: full });
-    }
-  }
-  return found;
-}
-
-function logTable(rows) {
-  const nameW = Math.max(6, ...rows.map((r) => r.name.length));
-  const groupW = Math.max(6, ...rows.map((r) => r.group.length));
-  console.log('');
-  console.log(`  ${'group'.padEnd(groupW)}  ${'name'.padEnd(nameW)}  count     status`);
-  console.log(`  ${'-'.repeat(groupW)}  ${'-'.repeat(nameW)}  --------  ------`);
-  for (const r of rows) {
-    console.log(
-      `  ${r.group.padEnd(groupW)}  ${r.name.padEnd(nameW)}  ${String(r.count).padStart(8)}  ${r.status}`
-    );
-  }
-  console.log('');
-}
+const SOURCES = [
+  { name: "caltrans",     fn: scrapeCaltrans },
+  { name: "wsdot",        fn: scrapeWsdot },
+  { name: "ibi511-group", fn: scrapeAllIbi511 },
+  { name: "ohgo",         fn: scrapeOhgo },
+  { name: "ncdot",        fn: scrapeNcdot },
+  { name: "nyc-tmc",      fn: scrapeNycTmc },
+  { name: "nps-webcams",  fn: scrapeNps },
+];
 
 async function main() {
-  const t0 = Date.now();
-  const sources = await discoverSources();
-  const chosen = onlyList
-    ? sources.filter((s) => onlyList.includes(s.name))
-    : sources;
-  if (onlyList && chosen.length === 0) {
-    throw new Error(`--only matched zero sources (have: ${sources.map((s) => s.name).join(', ')})`);
-  }
-
-  const rowsByName = {};
-  const rawAll = [];
-
-  for (const s of chosen) {
-    const label = `${s.group}/${s.name}`;
-    process.stdout.write(`→ ${label}\n`);
+  console.log("Scraping cameras…");
+  const raw = [];
+  for (const s of SOURCES) {
     try {
-      const mod = await import(pathToFileURL(s.path).href);
-      const raw = (await mod.run()) || [];
-      rawAll.push(...raw);
-      rowsByName[s.name] = { ...s, count: raw.length, status: 'ok' };
-    } catch (e) {
-      rowsByName[s.name] = { ...s, count: 0, status: 'FAILED' };
-      console.warn(`  ! ${label}: ${e.message.split('\n')[0]}`);
+      const recs = await s.fn();
+      raw.push(...recs);
+      logSource(s.name, recs.length);
+    } catch (err) {
+      logSource(s.name, 0, err);
     }
   }
 
-  const { records, dropped } = normalize(rawAll);
-  records.sort((a, b) => a.id.localeCompare(b.id));
-
-  const out = {
-    generatedAt: new Date().toISOString(),
-    totalSourcesAttempted: chosen.length,
-    totalRawRecords: rawAll.length,
-    totalDroppedRecords: dropped,
-    totalCameras: records.length,
-    cameras: records
-  };
-
-  const target = join(__dirname, '..', '..', 'assets', 'cameras.json');
-  mkdirSync(dirname(target), { recursive: true });
-  if (args.has('dry')) {
-    console.log('(--dry) not writing');
-  } else {
-    writeFileSync(target, JSON.stringify(out));
-    const size = statSync(target).size;
-    console.log(`wrote ${target} (${(size / 1024).toFixed(1)} KiB)`);
+  const cameras = normalizeAll(raw);
+  const byCategory = {};
+  const byState = {};
+  const bySource = {};
+  for (const c of cameras) {
+    byCategory[c.category] = (byCategory[c.category] || 0) + 1;
+    if (c.state) byState[c.state] = (byState[c.state] || 0) + 1;
+    bySource[c.source] = (bySource[c.source] || 0) + 1;
   }
 
-  logTable(Object.values(rowsByName));
-  console.log(`total cameras: ${records.length} (${dropped} dropped, ${rawAll.length} raw)`);
-  console.log(`elapsed: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  const payload = {
+    generated: new Date().toISOString(),
+    count: cameras.length,
+    byCategory,
+    byState,
+    bySource,
+    cameras,
+  };
+
+  mkdirSync(dirname(OUT_PATH), { recursive: true });
+  writeFileSync(OUT_PATH, JSON.stringify(payload));
+  console.log(
+    `\nWrote ${cameras.length} cameras to ${OUT_PATH}\n  by category: ${JSON.stringify(byCategory)}\n  by state: ${Object.keys(byState).length} states\n  by source: ${JSON.stringify(bySource)}`,
+  );
 }
 
-main().catch((e) => {
-  console.error(e);
+main().catch((err) => {
+  console.error("Scraper failed:", err);
   process.exit(1);
 });

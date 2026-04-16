@@ -1,137 +1,84 @@
-// Generic ArcGIS FeatureServer scraper. Many state DOTs publish their camera
-// inventory as an ArcGIS Feature Service, which is CORS-open and paginates
-// cleanly. This adapter handles pagination, resultOffset, and extracts common
-// camera-ish fields.
+// Adapter for ArcGIS Feature/MapServer `query` endpoints.
+//
+// Many state DOTs publish traffic cameras as an ArcGIS layer. This fetches
+// all features (paged) and converts them to the normalized shape using a
+// provided mapping function.
+//
+// `mapFeature({ attrs, lat, lon })` must return a raw camera record (or null).
 
-import { fetchJson } from '../utils.js';
+import { fetchJson } from "../utils.js";
 
-const REQUEST_SIZE = 2000; // ask for this many; server may return fewer
+// Convert Web Mercator (EPSG:3857 / 102100) meters to WGS84 lat/lon.
+function webMercatorToLatLon(x, y) {
+  const lon = (x / 20037508.34) * 180;
+  let lat = (y / 20037508.34) * 180;
+  lat = (180 / Math.PI) * (2 * Math.atan(Math.exp((lat * Math.PI) / 180)) - Math.PI / 2);
+  return { lat, lon };
+}
 
-/**
- * Query a FeatureServer layer, yielding every feature via pagination.
- * Respects the server's `maxRecordCount` — pagination continues while the
- * server reports `exceededTransferLimit`, regardless of how many rows we
- * asked for vs. received.
- * @param {string} layerUrl - e.g. https://.../FeatureServer/0
- */
-export async function* queryFeatures(layerUrl, { where = '1=1', outFields = '*', orderBy } = {}) {
+export async function fetchArcgisLayer(baseUrl, opts = {}) {
+  const {
+    where = "1=1",
+    outFields = "*",
+    pageSize = 1000,
+    extraParams = "",
+  } = opts;
+
+  const features = [];
   let offset = 0;
-  for (;;) {
-    const params = new URLSearchParams({
-      where,
-      outFields,
-      outSR: '4326',
-      f: 'geojson',
-      resultOffset: String(offset),
-      resultRecordCount: String(REQUEST_SIZE)
-    });
-    if (orderBy) params.set('orderByFields', orderBy);
-    const url = `${layerUrl}/query?` + params.toString();
-    const j = await fetchJson(url, { cacheMs: 5 * 60 * 1000 });
-    const feats = j.features || [];
-    for (const f of feats) yield f;
-    const more = !!(j.properties && j.properties.exceededTransferLimit);
-    if (!more || feats.length === 0) return;
-    offset += feats.length;
-    if (offset > 200_000) return; // safety
-  }
-}
-
-/**
- * High-level helper: run an ArcGIS layer through a feature->camera mapper.
- * `mapFeature(feature, props) -> CameraInput | null`.
- *
- * Stops pagination either when the server says there's no more data, OR when
- * `maxFeatures` is reached, OR when we've gone `staleScanLimit` rows without
- * discovering a new camera id (defends against ArcGIS layers that serve
- * millions of duplicate rows per camera).
- */
-export async function scrapeArcgis({
-  layerUrl, source, region, where = '1=1', orderBy, mapFeature,
-  maxFeatures = 200_000, staleScanLimit = 50_000
-}) {
-  const byId = new Map();
-  let scanned = 0;
-  let staleSince = 0;
-  for await (const feat of queryFeatures(layerUrl, { where, orderBy })) {
-    scanned++;
-    if (scanned > maxFeatures) break;
-    const props = feat.properties || {};
-    const coords = feat.geometry?.coordinates;
-    if (!coords || coords.length < 2) { staleSince++; if (staleSince > staleScanLimit) break; continue; }
-    const lon = Number(coords[0]);
-    const lat = Number(coords[1]);
-    let rec;
-    try { rec = mapFeature({ feat, props, lat, lon }); }
-    catch { rec = null; }
-    if (!rec) { staleSince++; if (staleSince > staleScanLimit) break; continue; }
-    const id = rec.id ?? `${source}:${lat}-${lon}`;
-    if (byId.has(id)) {
-      staleSince++;
-      if (staleSince > staleScanLimit) break;
-      continue;
+  // Some servers enforce a hard max record count. Loop until exhausted.
+  for (let i = 0; i < 200; i++) {
+    const url =
+      `${baseUrl}/query?where=${encodeURIComponent(where)}` +
+      `&outFields=${encodeURIComponent(outFields)}` +
+      `&returnGeometry=true&outSR=4326&f=json` +
+      `&resultOffset=${offset}&resultRecordCount=${pageSize}` +
+      (extraParams ? `&${extraParams}` : "");
+    const json = await fetchJson(url, { timeout: 45000 });
+    if (json.error) {
+      throw new Error(`ArcGIS error: ${json.error.message || json.error.code}`);
     }
-    byId.set(id, { source, region, ...rec });
-    staleSince = 0;
+    const batch = json.features || [];
+    if (batch.length === 0) break;
+    for (const f of batch) {
+      const attrs = f.attributes || {};
+      let lat = null;
+      let lon = null;
+      const g = f.geometry;
+      if (g && typeof g.x === "number" && typeof g.y === "number") {
+        const sr = json.spatialReference?.wkid || g.spatialReference?.wkid || 4326;
+        if (sr === 4326) {
+          lon = g.x;
+          lat = g.y;
+        } else if (sr === 102100 || sr === 3857 || sr === 102113) {
+          const ll = webMercatorToLatLon(g.x, g.y);
+          lat = ll.lat;
+          lon = ll.lon;
+        } else {
+          // Unknown SR; skip.
+          continue;
+        }
+      } else {
+        continue;
+      }
+      features.push({ attrs, lat, lon });
+    }
+    if (!json.exceededTransferLimit && batch.length < pageSize) break;
+    offset += batch.length;
   }
-  return Array.from(byId.values());
+  return features;
 }
 
-/**
- * Guess which property of a FeatureServer row holds the still-image URL.
- * Many DOT services name this Link, ImageURL, URL, CamURL, SnapshotURL, etc.
- */
-export function guessImageUrl(props) {
-  const keys = Object.keys(props);
-  const preferred = [
-    'ImageURL', 'imageurl', 'image_url', 'imageURL',
-    'Link', 'LINK', 'link',
-    'URL', 'url', 'Url',
-    'CameraURL', 'cameraURL', 'CamURL',
-    'SnapshotURL', 'snapshot_url', 'StillImageURL',
-    'Image', 'IMAGE',
-    'VideoURL', 'videourl'
-  ];
-  for (const k of preferred) {
-    if (props[k] && typeof props[k] === 'string' && /^https?:/i.test(props[k])) return props[k];
+export async function scrapeArcgis({ baseUrl, mapFeature, opts = {} }) {
+  const features = await fetchArcgisLayer(baseUrl, opts);
+  const out = [];
+  for (const f of features) {
+    try {
+      const rec = mapFeature(f);
+      if (rec) out.push(rec);
+    } catch {
+      // Skip malformed records.
+    }
   }
-  // Fallback: any value that looks like an http image URL.
-  for (const k of keys) {
-    const v = props[k];
-    if (typeof v === 'string' && /^https?:\/\/\S+\.(jpg|jpeg|png|webp)(\?|$)/i.test(v)) return v;
-  }
-  for (const k of keys) {
-    const v = props[k];
-    if (typeof v === 'string' && /^https?:\/\//i.test(v) && /cam|image|snap/i.test(k)) return v;
-  }
-  return null;
-}
-
-export function guessName(props) {
-  const preferred = [
-    'Location', 'LOCATION', 'location',
-    'Name', 'NAME', 'name',
-    'Description', 'DESCRIPTION', 'description',
-    'Label', 'Title', 'CamName', 'Cam_Name', 'CameraName'
-  ];
-  for (const k of preferred) {
-    if (typeof props[k] === 'string' && props[k].trim()) return props[k];
-  }
-  return null;
-}
-
-export function guessRoadway(props) {
-  const preferred = ['Route', 'ROUTE', 'route', 'Roadway', 'roadway', 'Road', 'ROAD', 'Highway'];
-  for (const k of preferred) {
-    if (typeof props[k] === 'string' && props[k].trim()) return props[k];
-  }
-  return null;
-}
-
-export function guessDirection(props) {
-  const preferred = ['Direction', 'DIRECTION', 'direction', 'Dir', 'DIR', 'dir'];
-  for (const k of preferred) {
-    if (typeof props[k] === 'string' && props[k].trim()) return props[k];
-  }
-  return null;
+  return out;
 }

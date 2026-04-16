@@ -2,8 +2,11 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main, claude/us-camera-map-viewer-FYFY1]
+    branches: [main]
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Refresh cameras"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -11,7 +14,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: false
 
 jobs:
@@ -23,11 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v3
         with:
-          # Only upload the public surface — not the scraper source.
-          path: .
-      - name: Deploy to Pages
-        id: deployment
+          path: "."
+      - id: deployment
         uses: actions/deploy-pages@v4

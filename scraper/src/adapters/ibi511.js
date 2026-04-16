@@ -1,41 +1,46 @@
-// Adapter for the IBI Group "511" platform. Tenants share a public REST API
-// exposed at /api/v2/get/cctv (and similar). Most tenants require a free key.
+// Adapter for "IBI 511" style traffic sites (Conduent / ITERIS legacy).
 //
-// Usage: pass a { host, key, region, source } and this returns CameraInputs.
+// These sites all share the same `/map/mapIcons/Cameras` endpoint that
+// returns an array of camera items with a numeric `itemId` and
+// `[lat, lon]` location. The live still is fetched from
+// `/map/Cctv/{itemId}` and returns a JPEG.
+//
+// Examples:
+//   511PA, 511NY, 511WI, 511GA, FL511
 
-import { fetchJson } from '../utils.js';
+import { fetchJson } from "../utils.js";
 
-export async function scrapeIbi511({ host, key, source, region }) {
-  if (!key) return []; // gracefully skip when caller didn't provide a key
-  const url = `https://${host}/api/v2/get/cctv?key=${encodeURIComponent(key)}&format=json`;
-  let rows;
-  try {
-    rows = await fetchJson(url, { cacheMs: 5 * 60 * 1000 });
-  } catch (e) {
-    throw new Error(`${source}: ${e.message}`);
-  }
-  const out = [];
-  for (const r of rows || []) {
-    const lat = Number(r.Latitude ?? r.latitude);
-    const lon = Number(r.Longitude ?? r.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    const img = r.ImageUrl || r.imageUrl || r.VideoUrl || r.videoUrl;
-    if (!img) continue;
-    const feeds = [];
-    if (/\.m3u8/i.test(img)) feeds.push({ type: 'hls', url: img });
-    else feeds.push({ type: 'jpeg', url: img, refreshSec: 10 });
-    out.push({
-      id: `${source}:${r.Id ?? r.id ?? img}`,
-      source,
-      region,
-      name: r.Name || r.Location || r.Description,
-      roadway: r.RoadwayName || r.Route,
-      direction: r.Direction,
+export async function scrapeIbi511({
+  source,
+  sourceName,
+  sourceUrl,
+  origin,          // e.g. "https://511ny.org"
+  state,
+  category = "traffic",
+  refresh = 10,
+  namePrefix = null,
+}) {
+  const json = await fetchJson(`${origin}/map/mapIcons/Cameras`, { timeout: 45000 });
+  const items = (json?.item2 || []).filter(
+    (x) => x && x.itemId && Array.isArray(x.location) && x.location.length === 2,
+  );
+  return items.map((x) => {
+    const [lat, lon] = x.location;
+    const id = String(x.itemId);
+    const title = (x.title && x.title.trim()) || `${namePrefix || state || "Traffic"} Camera ${id}`;
+    return {
+      id,
+      name: title,
       lat,
       lon,
-      feeds,
-      tags: ['traffic', 'highway']
-    });
-  }
-  return out;
+      state,
+      view: "image",
+      url: `${origin}/map/Cctv/${encodeURIComponent(id)}`,
+      refresh,
+      source,
+      sourceName,
+      sourceUrl: sourceUrl || origin,
+      category,
+    };
+  });
 }

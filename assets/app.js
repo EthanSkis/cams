@@ -1,387 +1,331 @@
-// Static frontend for the US Public Cameras map.
+// Map + camera viewer for the US Cams static site.
 //
-// Responsibilities:
-//   1. Load cameras.json and build a Leaflet + markercluster map.
-//   2. Filter by text / source / state / category.
-//   3. Render the appropriate player for each feed: jpeg (polled),
-//      mjpeg (native <img>), hls (hls.js / native Safari), iframe, youtube.
-//   4. Auto-fall-back to the next feed if one fails.
-//   5. Persist map view + selected camera in the URL hash for sharing.
+// Loads cameras.json, renders clustered markers on a Leaflet map, and opens a
+// side panel with either a refreshing still image, an HLS live stream,
+// a YouTube embed, an MJPEG stream, or a plain iframe — depending on the
+// `view` field of the camera record.
 
-/* globals L, Hls */
+const MAP_EL = document.getElementById("map");
+const COUNT_EL = document.getElementById("count");
+const SEARCH_EL = document.getElementById("search");
+const CATEGORY_EL = document.getElementById("category-filter");
+const VIEWER = document.getElementById("viewer");
+const VIEWER_TITLE = document.getElementById("viewer-title");
+const VIEWER_SUB = document.getElementById("viewer-sub");
+const VIEWER_MEDIA = document.getElementById("viewer-media");
+const VIEWER_META = document.getElementById("viewer-meta");
+const VIEWER_CLOSE = document.querySelector(".viewer-close");
+const DATA_STATUS = document.getElementById("data-status");
 
-const STATE = {
-  all: [],             // all cameras from cameras.json
-  filtered: [],        // current filter result
-  markers: null,       // L.markerClusterGroup
-  map: null,
-  markerById: new Map(),
-  activeCamera: null,
-  activeFeed: null,
-  activePoll: null,
-  activeHls: null
+const CATEGORY_COLORS = {
+  traffic: "#4f8cff",
+  weather: "#6ad1ff",
+  park: "#4cc27a",
+  beach: "#ffc34f",
+  ski: "#c9d6ff",
+  airport: "#b07aff",
+  city: "#ff9f4f",
+  other: "#8b95a7",
 };
 
-const els = {
-  stats: document.getElementById('stats'),
-  search: document.getElementById('search'),
-  fSource: document.getElementById('filter-source'),
-  fRegion: document.getElementById('filter-region'),
-  fTag: document.getElementById('filter-tag'),
-  reset: document.getElementById('reset'),
-  viewer: document.getElementById('viewer'),
-  viewerClose: document.getElementById('viewer-close'),
-  viewerTitle: document.getElementById('viewer-title'),
-  viewerMeta: document.getElementById('viewer-meta'),
-  viewerTabs: document.getElementById('viewer-tabs'),
-  viewerPlayer: document.getElementById('viewer-player'),
-  viewerLinks: document.getElementById('viewer-links'),
-  genAt: document.getElementById('gen-at')
-};
+const map = L.map(MAP_EL, {
+  zoomControl: true,
+  worldCopyJump: true,
+  preferCanvas: true,
+}).setView([39.5, -98.35], 4);
 
-async function boot() {
-  initMap();
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution:
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+}).addTo(map);
+
+const cluster = L.markerClusterGroup({
+  chunkedLoading: true,
+  spiderfyOnMaxZoom: true,
+  showCoverageOnHover: false,
+  maxClusterRadius: 55,
+  disableClusteringAtZoom: 13,
+});
+map.addLayer(cluster);
+
+let ALL_CAMS = [];
+let refreshTimer = null;
+let hls = null;
+
+function dotIcon(color) {
+  return L.divIcon({
+    className: "cam-marker",
+    html:
+      `<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'>` +
+      `<circle cx='8' cy='8' r='6' fill='${color}' stroke='#fff' stroke-width='1.5'/>` +
+      `</svg>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+}
+
+const ICONS = Object.fromEntries(
+  Object.entries(CATEGORY_COLORS).map(([k, v]) => [k, dotIcon(v)]),
+);
+
+async function loadCameras() {
+  COUNT_EL.textContent = "Loading…";
   try {
-    const res = await fetch('./assets/cameras.json', { cache: 'no-cache' });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const res = await fetch("assets/cameras.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    STATE.all = Array.isArray(data.cameras) ? data.cameras : [];
-    if (data.generatedAt) {
-      const d = new Date(data.generatedAt);
-      els.genAt.textContent = isNaN(d) ? data.generatedAt : d.toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+    const cameras = Array.isArray(data) ? data : data.cameras || [];
+    ALL_CAMS = cameras;
+    if (data.generated) {
+      const when = new Date(data.generated).toLocaleString();
+      DATA_STATUS.textContent = `Updated ${when}`;
     }
-  } catch (e) {
-    els.stats.textContent = `failed to load cameras.json: ${e.message}`;
-    console.error(e);
-    return;
-  }
-  buildFilterOptions();
-  wireControls();
-  applyFilters();
-  restoreFromHash();
-}
-
-function initMap() {
-  STATE.map = L.map('map', { preferCanvas: true, worldCopyJump: true }).setView([39.8, -98.5], 4);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    crossOrigin: true
-  }).addTo(STATE.map);
-  STATE.markers = L.markerClusterGroup({
-    chunkedLoading: true,
-    maxClusterRadius: 60,
-    spiderfyOnMaxZoom: true,
-    disableClusteringAtZoom: 14
-  });
-  STATE.map.addLayer(STATE.markers);
-  STATE.map.on('moveend', persistHash);
-  STATE.map.on('zoomend', persistHash);
-}
-
-function buildFilterOptions() {
-  const sources = new Set();
-  const regions = new Set();
-  const tags = new Set();
-  for (const c of STATE.all) {
-    if (c.source) sources.add(c.source);
-    if (c.region) regions.add(c.region);
-    for (const t of (c.tags || [])) tags.add(t);
-  }
-  fillSelect(els.fSource, [...sources].sort());
-  fillSelect(els.fRegion, [...regions].sort());
-  fillSelect(els.fTag, [...tags].sort());
-}
-
-function fillSelect(sel, vals) {
-  const first = sel.firstElementChild;
-  sel.innerHTML = '';
-  sel.appendChild(first);
-  for (const v of vals) {
-    const o = document.createElement('option');
-    o.value = v;
-    o.textContent = v;
-    sel.appendChild(o);
+    render();
+  } catch (err) {
+    COUNT_EL.textContent = "Failed to load";
+    console.error("Failed to load cameras.json:", err);
+    VIEWER.hidden = false;
+    VIEWER_TITLE.textContent = "Unable to load cameras";
+    VIEWER_SUB.textContent = "";
+    VIEWER_MEDIA.innerHTML =
+      `<div class="error">Could not fetch <code>assets/cameras.json</code>.<br>` +
+      `Run the scraper (<code>cd scraper && npm start</code>) to generate it.</div>`;
+    VIEWER_META.textContent = "";
   }
 }
 
-function wireControls() {
-  let searchTimer;
-  els.search.addEventListener('input', () => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(applyFilters, 160);
-  });
-  els.fSource.addEventListener('change', applyFilters);
-  els.fRegion.addEventListener('change', applyFilters);
-  els.fTag.addEventListener('change', applyFilters);
-  els.reset.addEventListener('click', () => {
-    els.search.value = '';
-    els.fSource.value = '';
-    els.fRegion.value = '';
-    els.fTag.value = '';
-    applyFilters();
-  });
-  els.viewerClose.addEventListener('click', closeViewer);
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeViewer();
-  });
-  window.addEventListener('hashchange', restoreFromHash);
+function passesFilters(c, q, category) {
+  if (category && c.category !== category) return false;
+  if (!q) return true;
+  const hay = [
+    c.name,
+    c.state,
+    c.region,
+    c.route,
+    c.sourceName,
+    c.description,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return hay.includes(q);
 }
 
-function applyFilters() {
-  const q = els.search.value.trim().toLowerCase();
-  const src = els.fSource.value;
-  const reg = els.fRegion.value;
-  const tag = els.fTag.value;
-  const filtered = STATE.all.filter((c) => {
-    if (src && c.source !== src) return false;
-    if (reg && c.region !== reg) return false;
-    if (tag && !(c.tags || []).includes(tag)) return false;
-    if (q) {
-      const hay = `${c.name || ''} ${c.roadway || ''} ${c.locality || ''} ${c.direction || ''}`.toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
-  STATE.filtered = filtered;
-  rerenderMarkers();
-  els.stats.textContent =
-    filtered.length === STATE.all.length
-      ? `${STATE.all.length.toLocaleString()} cameras`
-      : `${filtered.length.toLocaleString()} of ${STATE.all.length.toLocaleString()} cameras`;
-}
+function render() {
+  const q = SEARCH_EL.value.trim().toLowerCase();
+  const category = CATEGORY_EL.value;
+  cluster.clearLayers();
 
-function rerenderMarkers() {
-  STATE.markers.clearLayers();
-  STATE.markerById.clear();
   const batch = [];
-  for (const c of STATE.filtered) {
-    const m = L.marker([c.lat, c.lon], { title: c.name || c.id });
-    m.bindTooltip(tooltipHtml(c), { direction: 'top', offset: [0, -8] });
-    m.on('click', () => openViewer(c));
-    STATE.markerById.set(c.id, m);
+  let shown = 0;
+  for (const c of ALL_CAMS) {
+    if (!passesFilters(c, q, category)) continue;
+    shown++;
+    const icon = ICONS[c.category] || ICONS.other;
+    const m = L.marker([c.lat, c.lon], {
+      icon,
+      title: c.name,
+    });
+    m.on("click", () => openCamera(c));
     batch.push(m);
   }
-  STATE.markers.addLayers(batch);
+  cluster.addLayers(batch);
+  COUNT_EL.textContent = `${shown.toLocaleString()} cameras`;
 }
 
-function tooltipHtml(c) {
+SEARCH_EL.addEventListener("input", debounce(render, 180));
+CATEGORY_EL.addEventListener("change", render);
+VIEWER_CLOSE.addEventListener("click", closeViewer);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeViewer();
+});
+
+function closeViewer() {
+  stopMedia();
+  VIEWER.hidden = true;
+}
+
+function stopMedia() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  if (hls) {
+    try { hls.destroy(); } catch {}
+    hls = null;
+  }
+  VIEWER_MEDIA.innerHTML = "";
+}
+
+function openCamera(c) {
+  stopMedia();
+  VIEWER.hidden = false;
+  VIEWER_TITLE.textContent = c.name;
+  VIEWER_SUB.textContent = [c.region, c.state, c.route].filter(Boolean).join(" · ");
+
+  const meta = [];
   const badges = [];
-  if (c.source) badges.push(escape(c.source));
-  if (c.region) badges.push(escape(c.region));
-  return `<div><b>${escape(c.name || 'Camera')}</b></div>` +
-         (badges.length ? `<div style="font-size:11px;opacity:0.7">${badges.join(' · ')}</div>` : '');
-}
-
-function openViewer(c) {
-  STATE.activeCamera = c;
-  els.viewer.hidden = false;
-  els.viewer.setAttribute('aria-hidden', 'false');
-  els.viewerTitle.textContent = c.name || 'Camera';
-  els.viewerMeta.innerHTML = metaHtml(c);
-  els.viewerLinks.innerHTML = '';
-  const feeds = c.feeds || [];
-  els.viewerTabs.innerHTML = '';
-  feeds.forEach((f, i) => {
-    const b = document.createElement('button');
-    b.textContent = f.type.toUpperCase();
-    b.addEventListener('click', () => playFeed(c, f, i));
-    els.viewerTabs.appendChild(b);
-  });
-  if (feeds.length) playFeed(c, feeds[0], 0);
-  else renderError('no feeds available');
-  persistHash();
-}
-
-function playFeed(cam, feed, index) {
-  stopPlayback();
-  STATE.activeFeed = feed;
-  Array.from(els.viewerTabs.children).forEach((b, i) => {
-    b.classList.toggle('active', i === index);
-  });
-  els.viewerPlayer.innerHTML = '';
-
-  // Mixed-content pre-flight: if we're on HTTPS and the feed is HTTP, the
-  // browser will silently block the request. Show an explicit warning so the
-  // user understands what's happening.
-  if (location.protocol === 'https:' && /^http:\/\//i.test(feed.url)) {
-    renderError(
-      'this feed is served over HTTP; your browser blocks insecure requests on HTTPS pages. open it in a new tab:'
+  if (c.view) badges.push(`<span class="badge">${escapeHtml(viewLabel(c.view))}</span>`);
+  if (c.category) badges.push(`<span class="badge">${escapeHtml(c.category)}</span>`);
+  meta.push(badges.join(""));
+  if (c.sourceName) {
+    if (c.sourceUrl) {
+      meta.push(
+        `Source: <a href="${encodeURI(c.sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(c.sourceName)}</a>`,
+      );
+    } else {
+      meta.push(`Source: ${escapeHtml(c.sourceName)}`);
+    }
+  }
+  if (c.url) {
+    meta.push(
+      `<a href="${encodeURI(c.url)}" target="_blank" rel="noopener">Open original</a>`,
     );
-    addLink('open feed (HTTP)', feed.url);
-    return;
+  }
+  VIEWER_META.innerHTML = meta.filter(Boolean).join(" · ");
+
+  VIEWER_MEDIA.innerHTML = `<div class="loading">Loading camera…</div>`;
+
+  try {
+    if (c.view === "hls") {
+      mountHls(c);
+    } else if (c.view === "youtube") {
+      mountYouTube(c);
+    } else if (c.view === "iframe") {
+      mountIframe(c);
+    } else if (c.view === "mjpeg") {
+      mountImage(c, /*isMjpeg*/ true);
+    } else if (c.view === "image") {
+      mountImage(c, false);
+    } else {
+      mountLink(c);
+    }
+  } catch (err) {
+    VIEWER_MEDIA.innerHTML = `<div class="error">Could not play this camera: ${escapeHtml(String(err.message || err))}</div>`;
   }
 
-  switch (feed.type) {
-    case 'jpeg': return renderJpeg(cam, feed);
-    case 'mjpeg': return renderMjpeg(cam, feed);
-    case 'hls': return renderHls(cam, feed);
-    case 'youtube': return renderYouTube(cam, feed);
-    case 'iframe':
-    default: return renderIframe(cam, feed);
+  map.panTo([c.lat, c.lon], { animate: true });
+}
+
+function viewLabel(view) {
+  switch (view) {
+    case "hls": return "live stream";
+    case "mjpeg": return "live (MJPEG)";
+    case "youtube": return "YouTube live";
+    case "iframe": return "embedded";
+    case "image": return "still image";
+    case "page": return "link";
+    default: return view;
   }
 }
 
-function renderJpeg(cam, feed) {
-  const img = document.createElement('img');
-  img.alt = cam.name || 'camera image';
-  els.viewerPlayer.appendChild(img);
-  const base = feed.url;
-  const refreshSec = Math.max(1, Number(feed.refreshSec) || 10);
-  const tick = () => {
-    img.src = base + (base.includes('?') ? '&' : '?') + '_=' + Date.now();
+function mountImage(c, isMjpeg) {
+  const img = document.createElement("img");
+  img.alt = c.name;
+  img.referrerPolicy = "no-referrer";
+  img.loading = "eager";
+  img.decoding = "async";
+  const base = c.url;
+  const bust = () => `${base}${base.includes("?") ? "&" : "?"}_=${Date.now()}`;
+  img.src = isMjpeg ? base : bust();
+  img.onerror = () => {
+    VIEWER_MEDIA.innerHTML =
+      `<div class="error">The image for this camera could not be loaded.<br>` +
+      `<a href="${encodeURI(c.url)}" target="_blank" rel="noopener">Open the original source</a></div>`;
   };
-  img.addEventListener('error', () => tryFallback(cam, feed, 'image error'));
-  tick();
-  STATE.activePoll = setInterval(tick, refreshSec * 1000);
-  addLink('direct image', base);
+  VIEWER_MEDIA.innerHTML = "";
+  VIEWER_MEDIA.appendChild(img);
+
+  if (!isMjpeg) {
+    const period = (c.refresh || 8) * 1000;
+    refreshTimer = setInterval(() => {
+      if (document.hidden) return;
+      img.src = bust();
+    }, period);
+  }
 }
 
-function renderMjpeg(cam, feed) {
-  const img = document.createElement('img');
-  img.alt = cam.name || 'camera stream';
-  img.src = feed.url;
-  img.addEventListener('error', () => tryFallback(cam, feed, 'stream error'));
-  els.viewerPlayer.appendChild(img);
-  addLink('stream', feed.url);
-}
-
-function renderHls(cam, feed) {
-  const video = document.createElement('video');
+function mountHls(c) {
+  const video = document.createElement("video");
   video.controls = true;
   video.autoplay = true;
   video.muted = true;
   video.playsInline = true;
-  els.viewerPlayer.appendChild(video);
 
-  const onFail = (msg) => tryFallback(cam, feed, msg || 'hls error');
+  VIEWER_MEDIA.innerHTML = "";
+  VIEWER_MEDIA.appendChild(video);
 
-  // Native HLS (Safari, iOS)
-  if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = feed.url;
-    video.addEventListener('error', () => onFail('native hls error'));
-  } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-    const hls = new Hls({ enableWorker: true });
-    hls.loadSource(feed.url);
+  if (window.Hls && window.Hls.isSupported()) {
+    hls = new window.Hls({ lowLatencyMode: true });
+    hls.loadSource(c.url);
     hls.attachMedia(video);
-    hls.on(Hls.Events.ERROR, (_, data) => {
+    hls.on(window.Hls.Events.ERROR, (_event, data) => {
       if (data.fatal) {
-        try { hls.destroy(); } catch {}
-        STATE.activeHls = null;
-        onFail(`hls ${data.type}`);
+        VIEWER_MEDIA.innerHTML =
+          `<div class="error">Live stream error. <a href="${encodeURI(c.url)}" target="_blank" rel="noopener">Open original</a></div>`;
       }
     });
-    STATE.activeHls = hls;
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = c.url;
   } else {
-    onFail('hls not supported in this browser');
-  }
-  addLink('stream (.m3u8)', feed.url);
-}
-
-function renderYouTube(cam, feed) {
-  const frame = document.createElement('iframe');
-  frame.src = feed.url;
-  frame.allow = 'autoplay; encrypted-media';
-  frame.allowFullscreen = true;
-  frame.referrerPolicy = 'no-referrer';
-  els.viewerPlayer.appendChild(frame);
-  addLink('YouTube', feed.url);
-}
-
-function renderIframe(cam, feed) {
-  const frame = document.createElement('iframe');
-  frame.src = feed.url;
-  frame.referrerPolicy = 'no-referrer';
-  frame.sandbox = 'allow-scripts allow-same-origin allow-popups';
-  els.viewerPlayer.appendChild(frame);
-  addLink('open', feed.url);
-}
-
-function addLink(label, url) {
-  const a = document.createElement('a');
-  a.href = url; a.textContent = label;
-  a.target = '_blank'; a.rel = 'noreferrer noopener';
-  els.viewerLinks.appendChild(a);
-}
-
-function renderError(msg) {
-  const d = document.createElement('div');
-  d.style.cssText = 'padding:12px;font-size:13px;color:var(--fg-muted);';
-  d.textContent = msg;
-  els.viewerPlayer.innerHTML = '';
-  els.viewerPlayer.appendChild(d);
-}
-
-function tryFallback(cam, currentFeed, reason) {
-  const feeds = cam.feeds || [];
-  const nextIdx = feeds.findIndex((f) => f === currentFeed) + 1;
-  if (nextIdx > 0 && nextIdx < feeds.length) {
-    playFeed(cam, feeds[nextIdx], nextIdx);
-  } else {
-    renderError(`feed unavailable (${reason})`);
+    VIEWER_MEDIA.innerHTML =
+      `<div class="error">HLS playback isn't supported in this browser. <a href="${encodeURI(c.url)}" target="_blank" rel="noopener">Open original</a></div>`;
   }
 }
 
-function stopPlayback() {
-  if (STATE.activePoll) { clearInterval(STATE.activePoll); STATE.activePoll = null; }
-  if (STATE.activeHls) { try { STATE.activeHls.destroy(); } catch {} STATE.activeHls = null; }
-  els.viewerPlayer.innerHTML = '';
-}
-
-function closeViewer() {
-  stopPlayback();
-  STATE.activeCamera = null;
-  els.viewer.hidden = true;
-  els.viewer.setAttribute('aria-hidden', 'true');
-  persistHash();
-}
-
-function metaHtml(c) {
-  const parts = [];
-  if (c.source) parts.push(`<span class="badge">${escape(c.source)}</span>`);
-  if (c.region) parts.push(`<span class="badge">${escape(c.region)}</span>`);
-  if (c.roadway) parts.push(`<span class="badge">${escape(c.roadway)}</span>`);
-  if (c.direction) parts.push(`<span class="badge">${escape(c.direction)}</span>`);
-  if (c.locality) parts.push(`<span class="badge">${escape(c.locality)}</span>`);
-  parts.push(`<span class="badge">${c.lat.toFixed(3)}, ${c.lon.toFixed(3)}</span>`);
-  return parts.join('');
-}
-
-function escape(s) {
-  return String(s).replace(/[&<>"']/g, (ch) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
-  ));
-}
-
-// ---------- URL hash sync ----------
-
-function persistHash() {
-  if (!STATE.map) return;
-  const c = STATE.map.getCenter();
-  const z = STATE.map.getZoom();
-  const parts = [`@${c.lat.toFixed(4)},${c.lng.toFixed(4)},${z}z`];
-  if (STATE.activeCamera) parts.push(`cam=${encodeURIComponent(STATE.activeCamera.id)}`);
-  const hash = '#' + parts.join('&');
-  if (hash !== location.hash) {
-    history.replaceState(null, '', hash);
+function mountYouTube(c) {
+  // Accept either a video id, a youtube URL, or a full embed URL.
+  let src = c.url;
+  const idMatch = src.match(/(?:youtube\.com\/(?:watch\?v=|live\/|embed\/)|youtu\.be\/)([A-Za-z0-9_\-]+)/);
+  const videoId = idMatch ? idMatch[1] : (/^[A-Za-z0-9_\-]{11}$/.test(src) ? src : null);
+  if (videoId) {
+    src = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1`;
   }
+  const iframe = document.createElement("iframe");
+  iframe.src = src;
+  iframe.allow = "autoplay; encrypted-media; picture-in-picture";
+  iframe.allowFullscreen = true;
+  iframe.referrerPolicy = "no-referrer";
+  VIEWER_MEDIA.innerHTML = "";
+  VIEWER_MEDIA.appendChild(iframe);
 }
 
-function restoreFromHash() {
-  const h = location.hash || '';
-  const view = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(\d+)z/.exec(h);
-  if (view) {
-    STATE.map.setView([Number(view[1]), Number(view[2])], Number(view[3]));
-  }
-  const cam = /cam=([^&]+)/.exec(h);
-  if (cam) {
-    const id = decodeURIComponent(cam[1]);
-    const c = STATE.all.find((x) => x.id === id);
-    if (c) {
-      STATE.map.setView([c.lat, c.lon], Math.max(STATE.map.getZoom(), 12));
-      openViewer(c);
-    }
-  }
+function mountIframe(c) {
+  const iframe = document.createElement("iframe");
+  iframe.src = c.url;
+  iframe.allow = "autoplay; encrypted-media; picture-in-picture";
+  iframe.allowFullscreen = true;
+  iframe.referrerPolicy = "no-referrer";
+  VIEWER_MEDIA.innerHTML = "";
+  VIEWER_MEDIA.appendChild(iframe);
 }
 
-document.addEventListener('DOMContentLoaded', boot);
+function mountLink(c) {
+  VIEWER_MEDIA.innerHTML =
+    `<div class="error">This source doesn't expose an embeddable image or stream.<br>` +
+    `<a href="${encodeURI(c.url)}" target="_blank" rel="noopener">Open the camera page</a></div>`;
+}
+
+function debounce(fn, ms) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+}
+
+function escapeHtml(s) {
+  return String(s).replace(
+    /[&<>"']/g,
+    (c) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    })[c],
+  );
+}
+
+loadCameras();

@@ -1,58 +1,71 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>US Public Cameras — Live Map</title>
-  <meta name="description" content="Every publicly available live camera in the United States, on one map. Fully static — no backend." />
-  <meta name="color-scheme" content="dark light" />
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>US Cams — live traffic, park and weather cameras across the United States</title>
+    <meta
+      name="description"
+      content="A browsable map of thousands of public live cameras across the United States — state DOT traffic cams, national park webcams, weather cams and more."
+    />
+    <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📷</text></svg>" />
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" crossorigin="anonymous" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" crossorigin="anonymous" />
-  <link rel="stylesheet" href="assets/app.css" />
-</head>
-<body>
-  <header id="topbar">
-    <div class="title">
-      <h1>US Public Cameras</h1>
-      <span id="stats" class="stats">loading…</span>
-    </div>
-    <div class="controls">
-      <input id="search" type="search" placeholder="search name, road, city…" autocomplete="off" />
-      <select id="filter-source" aria-label="Filter by source">
-        <option value="">all sources</option>
-      </select>
-      <select id="filter-region" aria-label="Filter by state">
-        <option value="">all states</option>
-      </select>
-      <select id="filter-tag" aria-label="Filter by category">
-        <option value="">all categories</option>
-      </select>
-      <button id="reset" type="button">reset</button>
-    </div>
-  </header>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin="" />
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <link rel="stylesheet" href="assets/app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <h1>US Cams</h1>
+        <div class="controls">
+          <input id="search" type="search" placeholder="Search name, state, road…" autocomplete="off" />
+          <select id="category-filter" aria-label="Filter by category">
+            <option value="">All types</option>
+            <option value="traffic">Traffic</option>
+            <option value="weather">Weather</option>
+            <option value="park">Parks</option>
+            <option value="beach">Beach</option>
+            <option value="ski">Ski</option>
+            <option value="airport">Airport</option>
+            <option value="city">City</option>
+            <option value="other">Other</option>
+          </select>
+          <span id="count" class="count" aria-live="polite">Loading…</span>
+        </div>
+      </div>
+    </header>
 
-  <div id="map" role="application" aria-label="Camera map"></div>
+    <main id="map" aria-label="Map of United States cameras"></main>
 
-  <aside id="viewer" hidden aria-hidden="true">
-    <button id="viewer-close" type="button" aria-label="Close">×</button>
-    <h2 id="viewer-title">Camera</h2>
-    <div class="viewer-meta" id="viewer-meta"></div>
-    <div class="viewer-tabs" id="viewer-tabs"></div>
-    <div id="viewer-player" class="viewer-player"></div>
-    <div class="viewer-links" id="viewer-links"></div>
-  </aside>
+    <aside id="viewer" class="viewer" hidden aria-live="polite">
+      <button class="viewer-close" type="button" aria-label="Close camera viewer">×</button>
+      <header class="viewer-head">
+        <h2 id="viewer-title">Camera</h2>
+        <p id="viewer-sub"></p>
+      </header>
+      <div class="viewer-body">
+        <div id="viewer-media" class="viewer-media"></div>
+        <p id="viewer-meta" class="viewer-meta"></p>
+      </div>
+    </aside>
 
-  <footer id="footer">
-    <span>Data refreshed <span id="gen-at">—</span>.</span>
-    <span>Camera data © respective DOTs and agencies. Map © OpenStreetMap contributors.</span>
-    <a href="https://github.com/EthanSkis/cams" target="_blank" rel="noreferrer noopener">source</a>
-  </footer>
+    <footer class="credits">
+      Data from state DOTs, NPS, NWS/NOAA and other public sources. Cameras are owned by their respective agencies.
+      <a id="data-status" href="assets/cameras.json">cameras.json</a>
+    </footer>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.11/dist/hls.min.js" crossorigin="anonymous"></script>
-  <script src="assets/app.js" defer></script>
-</body>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+    <script src="assets/app.js" type="module"></script>
+  </body>
 </html>

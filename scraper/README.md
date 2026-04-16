@@ -1,56 +1,56 @@
-# Camera scraper
+# scraper
 
-Dependency-free Node.js scraper that discovers every `sources/**/*.js`
-module, runs each one's default-exported `run()`, normalizes the union,
-and writes `../assets/cameras.json`.
-
-## Run it
+Fetches public US camera feeds and writes a normalized
+`../assets/cameras.json`.
 
 ```sh
-node src/index.js                         # full run
-node src/index.js --dry                   # skip writing the output file
-node src/index.js --only=nyctmc,vdot      # run a subset by module name
+node src/index.js
 ```
 
-Requires Node.js 20+. No `npm install` needed.
+Node 20+ is required. No external dependencies — the scraper uses only
+Node's built-in `fetch` and friends.
 
-## Add a source
+## Layout
 
-1. Drop a new file under `src/sources/<group>/`.
-2. Export `async function run()` returning an array of `CameraInput`
-   records shaped like:
-   ```js
-   {
-     id: 'mysource:unique-key',        // optional but recommended
-     source: 'mysource',               // filled automatically from module if missing
-     region: 'TX',                     // USPS 2-letter, optional
-     locality: 'Austin',               // optional
-     name: 'I-35 at 6th St',
-     roadway: 'I-35',                  // optional
-     direction: 'N',                   // optional
-     lat: 30.2672,
-     lon: -97.7431,
-     feeds: [
-       { type: 'jpeg', url: '…', refreshSec: 10 },
-       { type: 'hls',  url: '…' }
-     ],
-     tags: ['traffic', 'highway']
-   }
-   ```
-3. If the source requires an API key, read it with `requireEnv('KEY_*')`
-   and return `[]` when unset — `index.js` will skip quietly.
-4. The normalizer (`normalize.js`) drops records missing lat/lon or all
-   feeds, de-dupes by `id`, and validates feed URLs.
-
-## Env vars
-
-See the "Enabling more sources" table in the top-level `README.md`.
-
-## On-disk cache
-
-Every fetch is cached under `.cache/` for 5 minutes by default (see
-`utils.js`). Delete the directory to force a fresh scrape:
-
-```sh
-rm -rf .cache && node src/index.js
 ```
+src/
+  index.js            # main entry, runs every source
+  normalize.js        # validates, dedupes, and picks a `view` per record
+  utils.js            # small helpers (fetch with retry, bbox check, etc.)
+  adapters/
+    arcgis.js         # paged ArcGIS Feature/MapServer query
+    ibi511.js         # `/map/mapIcons/Cameras` + `/map/Cctv/{id}` pattern
+  sources/
+    state/            # one file per state feed
+    city/
+    federal/
+```
+
+To add a source, drop a new file under `sources/`, return an array of raw
+records from an async function, and import it from `index.js`.
+
+## Output schema
+
+Each record in `cameras.json` looks like:
+
+```jsonc
+{
+  "id": "caltrans:d7-123-img",
+  "name": "I-5 N at Florence Ave",
+  "lat": 33.95, "lon": -118.25,
+  "state": "CA",
+  "route": "I-5",
+  "region": "Los Angeles",
+  "view": "image",                // "image"|"hls"|"mjpeg"|"youtube"|"iframe"|"page"
+  "url":  "https://...jpg",
+  "refresh": 5,                   // seconds (images only)
+  "source": "caltrans",
+  "sourceName": "Caltrans",
+  "sourceUrl": "https://cwwp2.dot.ca.gov/vm/iframemap.htm",
+  "category": "traffic"
+}
+```
+
+For Caltrans and NPS sources, the scraper emits separate records for the
+still image and the HLS live stream when both are available, so users can
+pick whichever their browser handles best.

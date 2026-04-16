@@ -1,12 +1,12 @@
 {
-  "name": "cams-scraper",
-  "version": "0.1.0",
+  "name": "us-cams-scraper",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Build-time scraper that produces assets/cameras.json for the US public camera map viewer.",
+  "description": "Scrapes public US camera feeds and emits a unified cameras.json",
   "scripts": {
-    "scrape": "node src/index.js",
-    "scrape:only": "node src/index.js --only"
+    "start": "node src/index.js",
+    "build": "node src/index.js"
   },
   "engines": {
     "node": ">=20"
