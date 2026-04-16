@@ -40,7 +40,7 @@ export async function fetchWithRetry(url, opts = {}) {
       });
       clearTimeout(t);
       if (!res.ok) {
-        // 503 often means rate-limit — retry with a much longer pause.
+        // 503/429 often means rate-limit — retry with a much longer pause.
         const err = new Error(`HTTP ${res.status} for ${url}`);
         err.status = res.status;
         throw err;
@@ -50,7 +50,8 @@ export async function fetchWithRetry(url, opts = {}) {
       clearTimeout(t);
       lastErr = err;
       if (attempt < retries) {
-        const base = err?.status === 503 || err?.status === 429 ? 3000 : 500;
+        const slow = err?.status === 503 || err?.status === 429;
+        const base = slow ? 5000 : 500;
         await wait(base * Math.pow(2, attempt));
       }
     }
