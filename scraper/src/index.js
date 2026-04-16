@@ -23,8 +23,17 @@ import { scrapeMiMdot } from "./sources/state/mi-mdot.js";
 import { scrapeKingCountyWa } from "./sources/state/wa-kingcounty.js";
 import { scrapeWyTeton } from "./sources/state/wy-teton.js";
 import { scrapeCalOes } from "./sources/state/ca-caloes.js";
+import { scrapeVdot } from "./sources/state/va-vdot.js";
+import { scrapeGdotLive } from "./sources/state/gdot-live.js";
+import { scrapeAldot } from "./sources/state/al-aldot.js";
+import { scrapeHawaiiDot } from "./sources/state/hi-hdot.js";
+import { scrapeArtimis } from "./sources/state/artimis.js";
+import { scrapeMnDot } from "./sources/state/mndot.js";
 import { scrapeGulfCoast } from "./sources/federal/gulf-coast.js";
+import { scrapeKansasCity } from "./sources/city/kansas-city.js";
 import { scrapeLakeMetroparks } from "./sources/city/lake-metroparks.js";
+import { scrapeArlingtonTx } from "./sources/city/arlington-tx.js";
+import { scrapeSanDiegoFlood } from "./sources/city/san-diego-flood.js";
 import { scrapeNycTmc } from "./sources/city/nyc-tmc.js";
 import { scrapeAustinTx } from "./sources/city/austin-tx.js";
 import { scrapeSeattle } from "./sources/city/seattle-wa.js";
@@ -54,8 +63,17 @@ const SOURCES = [
   { name: "wa-kingcounty", fn: scrapeKingCountyWa },
   { name: "wy-teton",      fn: scrapeWyTeton },
   { name: "ca-caloes",     fn: scrapeCalOes },
+  { name: "va-vdot",       fn: scrapeVdot },
+  { name: "gdot-live",     fn: scrapeGdotLive },
+  { name: "al-aldot",      fn: scrapeAldot },
+  { name: "hi-hdot",       fn: scrapeHawaiiDot },
+  { name: "artimis",       fn: scrapeArtimis },
+  { name: "mndot",         fn: scrapeMnDot },
   { name: "gulf-gcoos",    fn: scrapeGulfCoast },
+  { name: "kc-scout",      fn: scrapeKansasCity },
   { name: "lake-metroparks", fn: scrapeLakeMetroparks },
+  { name: "arlington-tx",  fn: scrapeArlingtonTx },
+  { name: "sd-flood",      fn: scrapeSanDiegoFlood },
   { name: "nyc-tmc",       fn: scrapeNycTmc },
   { name: "austin-tx",     fn: scrapeAustinTx },
   { name: "seattle",       fn: scrapeSeattle },

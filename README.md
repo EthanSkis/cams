@@ -10,48 +10,57 @@ refreshed on a schedule by GitHub Actions.
 
 ## Camera sources
 
-Currently aggregating **37,000+ cameras across 36 states**, all from public
+Currently aggregating **46,000+ cameras across 38 states**, all from public
 feeds.
 
-| Source                      | State(s)     | Format            |
-| --------------------------- | ------------ | ----------------- |
-| Caltrans (12 districts)     | CA           | Still + HLS live  |
-| AlertCalifornia (CalOES)    | CA           | Still (wildfire)  |
-| WSDOT                       | WA           | Still             |
-| King County + WSDOT feeds   | WA           | Still             |
-| Seattle DOT                 | WA (Seattle) | Still             |
-| Kirkland (city)             | WA           | Still             |
-| OR TripCheck / ODOT         | OR           | Still             |
-| Salem (city)                | OR           | Still             |
-| AZ511                       | AZ           | Still             |
-| 511 Idaho                   | ID           | Still             |
-| 511 Alaska                  | AK           | Still             |
-| UDOT                        | UT           | Still             |
-| NVRoads                     | NV           | Still             |
-| Wyoming / Teton County      | WY           | Still + HLS       |
-| MoDOT (Missouri)            | MO           | HLS live          |
-| IDOT (Illinois)             | IL           | Still             |
-| Iowa DOT                    | IA           | Still             |
-| MDOT MiDrive                | MI           | Still             |
-| OHGO / Ohio DOT             | OH           | Still             |
-| Lake Metroparks (Lake Cnty) | OH           | Iframe            |
-| 511PA                       | PA           | Still             |
-| MDOT CHART                  | MD           | HLS live          |
-| 511NY                       | NY           | Still             |
-| NYC DOT / TMC               | NYC          | Still             |
-| New England 511             | ME/NH/VT     | Still             |
-| NCDOT                       | NC           | Still             |
-| KYTC (Kentucky)             | KY           | Still             |
-| Lexington (city)            | KY           | Still             |
-| 511GA                       | GA           | Still             |
-| FL511                       | FL           | Still             |
-| GCOOS (Gulf Coast cams)     | TX/LA/MS/AL/FL | Iframe         |
-| 511 Louisiana               | LA           | Still             |
-| 511WI                       | WI           | Still             |
-| Austin (city)               | TX           | Still             |
-| Montgomery County           | TX           | Iframe            |
-| Loveland (city)             | CO           | Still             |
-| National Park Service       | nationwide   | Still + HLS + YT  |
+| Source                        | State(s)       | Format           |
+| ----------------------------- | -------------- | ---------------- |
+| Caltrans (12 districts)       | CA             | Still + HLS live |
+| AlertCalifornia (CalOES)      | CA             | Still (wildfire) |
+| San Diego County Flood        | CA             | Iframe           |
+| WSDOT                         | WA             | Still            |
+| King County + WSDOT feeds     | WA             | Still            |
+| Seattle DOT                   | WA             | Still            |
+| Kirkland (city)               | WA             | Still            |
+| OR TripCheck / ODOT           | OR             | Still            |
+| Salem (city)                  | OR             | Still            |
+| AZ511                         | AZ             | Still            |
+| 511 Idaho                     | ID             | Still            |
+| 511 Alaska                    | AK             | Still            |
+| UDOT                          | UT             | Still            |
+| NVRoads                       | NV             | Still            |
+| Wyoming / Teton County        | WY             | Still + HLS      |
+| MnDOT (Minnesota)             | MN             | Still            |
+| MoDOT (Missouri)              | MO             | HLS live         |
+| KC Scout (Kansas City)        | MO/KS          | Still            |
+| IDOT (Illinois)               | IL             | Still            |
+| Iowa DOT                      | IA             | Still            |
+| MDOT MiDrive                  | MI             | Still            |
+| OHGO / Ohio DOT               | OH             | Still            |
+| ARTIMIS (Cincinnati)          | OH/KY          | Still            |
+| Lake Metroparks (Lake Cnty)   | OH             | Iframe           |
+| 511PA                         | PA             | Still            |
+| MDOT CHART                    | MD             | HLS live         |
+| VDOT (Virginia)               | VA             | Still + HLS      |
+| 511NY                         | NY             | Still            |
+| NYC DOT / TMC                 | NY             | Still            |
+| New England 511               | ME/NH/VT       | Still            |
+| NCDOT                         | NC             | Still            |
+| KYTC (Kentucky)               | KY             | Still            |
+| Lexington (city)              | KY             | Still            |
+| GDOT NaviGAtor                | GA             | Still + HLS      |
+| 511GA                         | GA             | Still            |
+| FL511                         | FL             | Still            |
+| ALDOT / algotraffic           | AL             | Still + HLS      |
+| Hawaii DOT / GoAkamai         | HI             | Still            |
+| GCOOS (Gulf Coast cams)       | TX/LA/MS/AL/FL | Iframe           |
+| 511 Louisiana                 | LA             | Still            |
+| 511WI                         | WI             | Still            |
+| Austin (city)                 | TX             | Still            |
+| Arlington (city)              | TX             | Still            |
+| Montgomery County             | TX             | Iframe           |
+| Loveland (city)               | CO             | Still            |
+| National Park Service         | nationwide     | Still + HLS + YT |
 
 All sources are public. Cameras belong to their respective agencies.
 
